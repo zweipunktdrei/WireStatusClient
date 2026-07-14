@@ -144,6 +144,49 @@ class WireStatusClient extends WireData implements Module
             }
         }
 
+        // Pfad zur Logdatei modules.txt ermitteln
+        $logFile = $this->wire('config')->paths->logs . 'modules.txt';
+        $recentUpdates = [];
+        if (file_exists($logFile) && is_readable($logFile)) {
+            $thirtyDaysAgo = time() - (30 * 24 * 60 * 60); // 30 Tage in Sekunden
+
+            // Logdatei zeilenweise einlesen
+            $lines = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
+            // Von hinten nach vorne lesen (die neuesten Einträge zuerst)
+            for ($i = count($lines) - 1; $i >= 0; $i--) {
+                $line = $lines[$i];
+
+                // Standard-Logformat in ProcessWire: YYYY-MM-DD HH:MM:SS USER MESSAGE
+                if (preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(\S+)\s+(.*)$/', $line, $matches)) {
+                    $timestamp = strtotime($matches[1]);
+
+                    // Wenn der Eintrag älter als 30 Tage ist, können wir das Parsen abbrechen (Log ist chronologisch)
+                    if ($timestamp < $thirtyDaysAgo) {
+                        break;
+                    }
+
+                    $user = $matches[2];
+                    $message = $matches[3];
+
+                    // Filter für relevante Aktionen (Installationen, Updates, Deinstallationen)
+                    if (
+                        stripos($message, 'update') !== false ||
+                        stripos($message, 'upgrade') !== false ||
+                        stripos($message, 'install') !== false ||
+                        stripos($message, 'aktualisiert') !== false
+                    ) {
+
+                        $recentUpdates[] = [
+                            'date' => date('d.m.Y H:i', $timestamp),
+                            'user' => $user,
+                            'message' => $message
+                        ];
+                    }
+                }
+            }
+        }
+
         $response = [
             'status' => 'success',
             'site_name' => $this->wire('config')->siteName ?: ($_SERVER['HTTP_HOST'] ?? 'ProcessWire Site'),
@@ -151,7 +194,8 @@ class WireStatusClient extends WireData implements Module
             'system' => $system,
             'has_upgrade_module' => $hasUpgradeModule,
             'updates' => $updates,
-            'modules' => $installedModules
+            'modules' => $installedModules,
+            'recent_updates' => $recentUpdates
         ];
 
         header('Content-Type: application/json; charset=utf-8');
