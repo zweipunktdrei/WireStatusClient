@@ -13,7 +13,7 @@ namespace ProcessWire;
 $info = [
     'title' => __('WireStatus Client'),
     'summary' => __('Securely exposes system version, diagnostic info, and pending module updates to a WireStatus Master installation.'),
-    'version' => '1.0.1',
+    'version' => '1.0.2',
     'author' => 'Markus Thomas',
     'icon' => 'plug',
     'requires' => 'ProcessWire>=3.0.0',

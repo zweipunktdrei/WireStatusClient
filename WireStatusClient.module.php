@@ -144,40 +144,52 @@ class WireStatusClient extends WireData implements Module
             }
         }
 
-        // Pfad zur Logdatei modules.txt ermitteln
-        $logFile = $this->wire('config')->paths->logs . 'modules.txt';
+        $thirtyDaysAgo = time() - (30 * 24 * 60 * 60); // 30 Tage in Sekunden
         $recentUpdates = [];
-        if (file_exists($logFile) && is_readable($logFile)) {
-            $thirtyDaysAgo = time() - (30 * 24 * 60 * 60); // 30 Tage in Sekunden
+        // Konfiguration der auszulesenden Logdateien und deren Filter
+        $logFiles = [
+            'modules.txt' => ['module', 'install', 'upgrade', 'update', 'version changes', 'aktualisiert'],
+            'system-updater.txt' => [] // Da diese Datei nur Core-Updates betrifft, lesen wir alle Zeilen aus
+        ];
+        foreach ($logFiles as $filename => $keywords) {
+            $filePath = $this->wire('config')->paths->logs . $filename;
 
-            // Logdatei zeilenweise einlesen
-            $lines = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if (file_exists($filePath) && is_readable($filePath)) {
+                $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 
-            // Von hinten nach vorne lesen (die neuesten Einträge zuerst)
-            for ($i = count($lines) - 1; $i >= 0; $i--) {
-                $line = $lines[$i];
+                foreach ($lines as $line) {
+                    // ProcessWire trennt Logs mit Tabulatoren: Datum | User | URL | Message
+                    $parts = explode("\t", $line);
 
-                // Standard-Logformat in ProcessWire: YYYY-MM-DD HH:MM:SS USER MESSAGE
-                if (preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(\S+)\s+(.*)$/', $line, $matches)) {
-                    $timestamp = strtotime($matches[1]);
+                    if (count($parts) >= 2) {
+                        $dateStr = trim($parts[0]);
+                        $timestamp = strtotime($dateStr);
 
-                    // Wenn der Eintrag älter als 30 Tage ist, können wir das Parsen abbrechen (Log ist chronologisch)
-                    if ($timestamp < $thirtyDaysAgo) {
-                        break;
-                    }
+                        // Ignorieren, wenn das Datum ungültig oder älter als 30 Tage ist
+                        if (!$timestamp || $timestamp < $thirtyDaysAgo) {
+                            continue;
+                        }
 
-                    $user = $matches[2];
-                    $message = $matches[3];
+                        $message = trim(end($parts)); // Die Log-Nachricht steht immer ganz hinten
+                        $user = count($parts) > 2 ? trim($parts[1]) : '-';
 
-                    // Filter für relevante Aktionen (Installationen, Updates, Deinstallationen)
-                    if (
-                        stripos($message, 'update') !== false ||
-                        stripos($message, 'upgrade') !== false ||
-                        stripos($message, 'install') !== false ||
-                        stripos($message, 'aktualisiert') !== false
-                    ) {
+                        // Falls Keywords definiert sind, Nachricht filtern
+                        if (!empty($keywords)) {
+                            $match = false;
+                            foreach ($keywords as $kw) {
+                                if (stripos($message, $kw) !== false) {
+                                    $match = true;
+                                    break;
+                                }
+                            }
+                            if (!$match) {
+                                continue;
+                            }
+                        }
 
+                        // Eintrag hinzufügen
                         $recentUpdates[] = [
+                            'timestamp' => $timestamp,
                             'date' => date('d.m.Y H:i', $timestamp),
                             'user' => $user,
                             'message' => $message
@@ -186,6 +198,18 @@ class WireStatusClient extends WireData implements Module
                 }
             }
         }
+        // Alle Logs chronologisch (neueste zuerst) sortieren
+        usort($recentUpdates, function ($a, $b) {
+            return $b['timestamp'] - $a['timestamp'];
+        });
+        // Nur die sortierten Daten ohne den Timestamp-Key weitergeben
+        $payload['recent_updates'] = array_map(function ($item) {
+            return [
+                'date' => $item['date'],
+                'user' => $item['user'],
+                'message' => $item['message']
+            ];
+        }, $recentUpdates);
 
         $response = [
             'status' => 'success',
